@@ -6,6 +6,8 @@ import chess
 import chess.pgn
 import chess.svg
 
+import git
+
 import numpy as np
 
 from keras.layers import Input, Dense, Flatten, BatchNormalization, Dropout, Lambda, merge, Merge, Embedding
@@ -153,7 +155,8 @@ class ChessNet:
                                 extra_tensors=extra_tensors,
                                 target_tensors=target_tensors)
 
-        savedir = 'logs/' + str(datetime.now())
+        repo = git.Repo(".")
+        savedir = 'logs/' + str(datetime.now()) + " " + repo.git.describe("--always", "--dirty", "--long")
         tbcb = TensorBoard(log_dir=savedir, histogram_freq=0, write_graph=True, write_images=False)
         mccb = ModelCheckpoint(savedir+'/model.{epoch:04d}-{val_loss:.2f}.hdf5', monitor='val_loss', save_best_only=True)
         cb = [tbcb, mccb]
