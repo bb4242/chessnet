@@ -7,6 +7,7 @@ import chess.pgn
 import chess.svg
 
 import git
+import os
 
 import numpy as np
 
@@ -128,39 +129,54 @@ class ChessNet:
 
         return board_score
 
-    def train_on_games(self, pgn, n_games):
-
-        train_file = "train.npz"
-        try:
-            loaded = np.load(train_file)
-            board_tensors = loaded['board_tensors']
-            extra_tensors = loaded['extra_tensors']
-            target_tensors = loaded['target_tensors']
-            print "Loaded from {}".format(train_file)
-        except IOError:
-            pgn.seek(0)
-            game_data = []
-            for i in range(n_games):
-                game = chess.pgn.read_game(pgn)
+    def process_pgn_file(self, pgn_filename):
+        pgn_file = open(pgn_filename)
+        game_data = []
+        i = 0
+        while True:
+            game = chess.pgn.read_game(pgn_file)
+            if game is None:
+                break
+            if len(game.errors) == 0 and 'SetUp' not in game.headers and len(list(game.main_line())) > 0:
                 game_data.append(self.process_game(game))
+                i += 1
                 if i % 100 == 0:
-                    print "Loading game {}/{}".format(i, n_games)
+                    print "Processed {} games".format(i)
 
-            board_tensors = np.concatenate([gd[0] for gd in game_data])
-            extra_tensors = np.concatenate([gd[1] for gd in game_data])
-            target_tensors = np.concatenate([gd[2] for gd in game_data])
+        print "Total games: {}".format(i)
+        print [gd[0].shape for gd in game_data]
+        board_tensors = np.concatenate([gd[0] for gd in game_data])
+        extra_tensors = np.concatenate([gd[1] for gd in game_data])
+        target_tensors = np.concatenate([gd[2] for gd in game_data])
 
-            n_samples = len(board_tensors)
-            permutation = np.random.permutation(n_samples)
-            board_tensors = board_tensors[permutation]
-            extra_tensors = extra_tensors[permutation]
-            target_tensors = target_tensors[permutation]
+        n_samples = len(board_tensors)
+        permutation = np.random.permutation(n_samples)
+        board_tensors = board_tensors[permutation]
+        extra_tensors = extra_tensors[permutation]
+        target_tensors = target_tensors[permutation]
 
-            np.savez_compressed(train_file, board_tensors=board_tensors,
-                                extra_tensors=extra_tensors,
-                                target_tensors=target_tensors)
+        save_file = os.path.splitext(pgn_filename)[0] + '-moves.npz'
+        np.savez_compressed(save_file, board_tensors=board_tensors,
+                            extra_tensors=extra_tensors,
+                            target_tensors=target_tensors)
+
+        print "Wrote {}".format(save_file)
+        print "Total moves: {}".format(n_samples)
+        print "Good/bad move ratio (should be 0.5): {}".format(np.mean(target_tensors))
+
+    def train_on_games(self, npz_file):
+
+        loaded = np.load(npz_file)
+        board_tensors = loaded['board_tensors']
+        extra_tensors = loaded['extra_tensors']
+        target_tensors = loaded['target_tensors']
+        print "Loaded from {}".format(npz_file)
 
         repo = git.Repo(".")
+        if repo.is_dirty():
+            print "Refusing to run with uncommitted changes. Please commit them first."
+            return
+
         savedir = 'logs/' + str(datetime.now()) + " " + repo.git.describe("--always", "--dirty", "--long")
         tbcb = TensorBoard(log_dir=savedir, histogram_freq=0, write_graph=True, write_images=False)
         mccb = ModelCheckpoint(savedir+'/model.{epoch:04d}-{val_loss:.2f}.hdf5', monitor='val_loss', save_best_only=True)
@@ -171,17 +187,9 @@ class ChessNet:
 
 
 def main():
-    pgn = open("gorgobase.pgn")
     net = ChessNet()
-    net.train_on_games(pgn, 50000)
-
-    # games = 0
-    # for offset, headers in chess.pgn.scan_headers(pgn):
-    #     games += 1
-    #     if games % 10000 == 0:
-    #         print games
-    # print games
-
+    net.process_pgn_file('gorgobase-2400.pgn')
+    #net.train_on_games('test-moves.npz')
 
 if __name__ == '__main__':
     main()
