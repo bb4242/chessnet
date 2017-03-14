@@ -80,46 +80,51 @@ class ChessNet:
                                  input_shape=input_shape, input_dtype='uint8',
                                  output_shape=output_shape))
         board_one_hot.add(Flatten())
+        board_one_hot.add(BatchNormalization())
 
         extra = Sequential()
-        extra.add(Dense(32, input_shape=(5, )))
+        extra.add(BatchNormalization(input_shape=(5, )))
+#        extra.add(Dense(32, input_shape=(5, )))
 
         board_score = Sequential()
         merged_layer = Merge([board_one_hot, extra], mode='concat')
         board_score.add(merged_layer)
 
         board_score.add(Dense(n, activation='relu'))
-        #board_score.add(BatchNormalization())
+        board_score.add(Dense(n, activation='relu'))
+        board_score.add(Dense(n, activation='relu'))
+        board_score.add(BatchNormalization())
         board_score.add(Dropout(0.2))
 
         board_score.add(Dense(n, activation='relu'))
-        #board_score.add(BatchNormalization())
+        board_score.add(Dense(n, activation='relu'))
+        board_score.add(Dense(n, activation='relu'))
+        board_score.add(BatchNormalization())
         board_score.add(Dropout(0.2))
 
         board_score.add(Dense(n, activation='relu'))
-        #board_score.add(BatchNormalization())
+        board_score.add(Dense(n, activation='relu'))
+        board_score.add(Dense(n, activation='relu'))
+        board_score.add(BatchNormalization())
         board_score.add(Dropout(0.2))
 
         board_score.add(Dense(n, activation='relu'))
-        # board_score.add(BatchNormalization())
+        board_score.add(Dense(n, activation='relu'))
+        board_score.add(Dense(n, activation='relu'))
+        board_score.add(BatchNormalization())
         board_score.add(Dropout(0.2))
 
         board_score.add(Dense(n, activation='relu'))
-        # board_score.add(BatchNormalization())
-        board_score.add(Dropout(0.2))
-
         board_score.add(Dense(n, activation='relu'))
-        # board_score.add(BatchNormalization())
-        board_score.add(Dropout(0.2))
-
         board_score.add(Dense(n, activation='relu'))
-        # board_score.add(BatchNormalization())
+        board_score.add(BatchNormalization())
         board_score.add(Dropout(0.2))
 
-        #board_score.add(Flatten())
         board_score.add(Dense(1, activation='sigmoid'))
 
         board_score.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+        print board_score.summary()
 
         return board_score
 
@@ -162,7 +167,7 @@ class ChessNet:
         cb = [tbcb, mccb]
 
         self.board_score.fit([board_tensors, extra_tensors], target_tensors, nb_epoch=1000, callbacks=cb,
-                             validation_split=0.1)
+                             batch_size=4096*2, validation_split=0.1)
 
 
 def main():
