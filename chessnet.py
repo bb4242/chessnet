@@ -107,9 +107,9 @@ class ChessNet:
         print("Loaded from {}".format(npz_file))
 
         repo = git.Repo(".")
-        # if repo.is_dirty():
-        #     print("Refusing to run with uncommitted changes. Please commit them first.")
-        #     return
+        if repo.is_dirty():
+            print("Refusing to run with uncommitted changes. Please commit them first.")
+            return
 
         savedir = 'logs/' + str(datetime.now()) + " " + repo.git.describe("--always", "--dirty", "--long")
         tbcb = TensorBoard(log_dir=savedir, histogram_freq=0, write_graph=True, write_images=False)
@@ -121,11 +121,11 @@ class ChessNet:
 
 
 def main():
-    pp = Preprocessor('gorgobase-2400.pgn')
-    pp.process_pgn_file()
+    #pp = Preprocessor('gorgobase-2500.pgn')
+    #pp.process_pgn_file()
 
-    #net = ChessNet()
-    #net.train_on_games('test-moves.npz')
+    net = ChessNet()
+    net.train_on_games('gorgobase-2500-moves.npz')
 
 if __name__ == '__main__':
     main()
