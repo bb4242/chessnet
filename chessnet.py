@@ -117,7 +117,7 @@ class ChessNet:
         cb = [tbcb, mccb]
 
         self.board_score.fit([board_tensors, extra_tensors], target_tensors, nb_epoch=1000, callbacks=cb,
-                             batch_size=4096*2, validation_split=0.1)
+                             batch_size=4096, validation_split=0.1)
 
 
 def main():
