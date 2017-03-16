@@ -14,7 +14,6 @@ import numpy as np
 from keras.layers import Input, Dense, Flatten, BatchNormalization, Dropout, Lambda, merge, Merge, Embedding
 from keras.models import Model, Sequential
 from keras.callbacks import TensorBoard, ModelCheckpoint
-import keras.backend as K
 
 from preprocessor import Preprocessor
 
@@ -26,30 +25,19 @@ class ChessNet:
 
     def initialize_model(self):
         n = 1024
+        n_pieces = len(Preprocessor.PIECES)
 
-        # uint8 is ok for <= 256 classes, otherwise use int32
-        #board_score.add(Input(shape=input_shape, dtype='uint8'))
-
-        # Without the output_shape, Keras tries to infer it using calling the function
-        # on an float32 input, which results in error in TensorFlow:
-        #
-        #   TypeError: DataType float32 for attr 'TI' not in list of allowed values: uint8, int32, int64
-
+        # One hot encoding of the board, one class per piece type
         board_one_hot = Sequential()
-        nb_classes = len(Preprocessor.PIECES)
-        input_shape = (64, )
-        output_shape = (64, nb_classes)
-        board_one_hot.add(Lambda(K.one_hot,
-                                 arguments={'nb_classes': nb_classes},
-                                 input_shape=input_shape, input_dtype='uint8',
-                                 output_shape=output_shape))
+        board_one_hot.add(Embedding(n_pieces, n_pieces, input_length=64, weights=[np.eye(n_pieces)], trainable=False))
         board_one_hot.add(Flatten())
         board_one_hot.add(BatchNormalization())
 
+        # Encoding for extra board state (player turn, castling info, etc)
         extra = Sequential()
         extra.add(BatchNormalization(input_shape=(5, )))
-#        extra.add(Dense(32, input_shape=(5, )))
 
+        # Merge all inputs
         board_score = Sequential()
         merged_layer = Merge([board_one_hot, extra], mode='concat')
         board_score.add(merged_layer)
