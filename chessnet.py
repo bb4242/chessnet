@@ -165,7 +165,7 @@ class ChessNet:
             train_gen.generate_samples(), train_gen.samples_per_epoch,
             nb_epoch=1000, callbacks=self.callbacks,
             validation_data=val_gen.generate_samples(), nb_val_samples=val_gen.samples_per_epoch,
-            max_q_size=10, nb_worker=1, pickle_safe=True
+            max_q_size=1000, nb_worker=1, pickle_safe=True
         )
 
 
