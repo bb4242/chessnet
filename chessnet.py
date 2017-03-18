@@ -11,8 +11,21 @@ import git
 from keras.layers import Input, Dense, Flatten, BatchNormalization, Dropout, Lambda, merge, Merge, Embedding
 from keras.models import Model, Sequential
 from keras.callbacks import TensorBoard, ModelCheckpoint
+import keras.backend as K
 
 from preprocessor import Preprocessor
+
+
+def rel_acc(y_true, y_pred):
+    """Relative accuracy metric that calculates the percentage of times
+    that the correct move is chosen over the random move. Relies on the
+    correct and random moves being stored sequentially in the input and
+    output tensors of the network.
+    """
+    y_neg = y_pred * (2*y_true - 1)
+    y_pairs = K.reshape(y_neg, (-1, 2))
+    y_sum = K.sum(y_pairs, axis=-1)
+    return K.mean(K.greater(y_sum, 0), axis=-1)
 
 
 class DataDirGenerator:
@@ -123,7 +136,7 @@ class ChessNet:
 
         board_score.add(Dense(1, activation='sigmoid'))
 
-        board_score.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+        board_score.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy', rel_acc])
 
         print(board_score.summary())
 
