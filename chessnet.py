@@ -1,15 +1,12 @@
 #!/usr/bin/python
 
 from datetime import datetime
-
-import chess
-import chess.pgn
-import chess.svg
-
-import git
+import sys
 import os
+from glob import glob
 
 import numpy as np
+import git
 
 from keras.layers import Input, Dense, Flatten, BatchNormalization, Dropout, Lambda, merge, Merge, Embedding
 from keras.models import Model, Sequential
@@ -18,10 +15,56 @@ from keras.callbacks import TensorBoard, ModelCheckpoint
 from preprocessor import Preprocessor
 
 
+class DataDirGenerator:
+
+    def __init__(self, data_dir, batch_size):
+        self.data_dir = data_dir
+        self.npz_files = sorted(glob(data_dir + '/*.npz'))
+        self.batch_size = batch_size
+        n_files = len(self.npz_files)
+
+        # Figure out how many total mini-batches are contained in the directory
+        self.n_batches = 0
+        for fi, f in enumerate(self.npz_files):
+            print("Scanning {} ({}/{})".format(f, fi+1, n_files))
+            self.n_batches += len(np.load(f)['board_tensors']) / batch_size
+        print("Total mini-batches in {}: {}".format(data_dir, self.n_batches))
+
+    @property
+    def samples_per_epoch(self):
+        return self.batch_size * self.n_batches
+
+    def generate_samples(self):
+        while True:
+            for f in self.npz_files:
+                data = np.load(f)
+                board_tensors = data['board_tensors']
+                extra_tensors = data['extra_tensors']
+                target_tensors = data['target_tensors']
+                for batch_idx in xrange(len(board_tensors) / self.batch_size):
+                    start = batch_idx * self.batch_size
+                    end = (batch_idx+1) * self.batch_size
+                    yield (
+                        [board_tensors[start:end], extra_tensors[start:end]],
+                        target_tensors[start:end]
+                    )
+
 class ChessNet:
 
-    def __init__(self):
+    def __init__(self, batch_size=4096):
+        self.batch_size = batch_size
         self.board_score = self.initialize_model()
+
+        repo = git.Repo(".")
+        # if repo.is_dirty():
+        #     print("Refusing to run with uncommitted changes. Please commit them first.")
+        #     return
+        savedir = 'logs/' + str(datetime.now()) + " " + repo.git.describe("--always", "--dirty", "--long")
+        tbcb = TensorBoard(log_dir=savedir, histogram_freq=0, write_graph=True, write_images=False)
+        mccb = ModelCheckpoint(savedir+'/model.{epoch:04d}-{val_loss:.2f}.hdf5',
+                               monitor='val_loss', save_best_only=False)
+        self.callbacks = [tbcb, mccb]
+
 
     def initialize_model(self):
         n = 1024
@@ -86,7 +129,7 @@ class ChessNet:
 
         return board_score
 
-    def train_on_games(self, npz_file):
+    def train_on_single_npz(self, npz_file):
 
         loaded = np.load(npz_file)
         board_tensors = loaded['board_tensors']
@@ -94,26 +137,28 @@ class ChessNet:
         target_tensors = loaded['target_tensors']
         print("Loaded from {}".format(npz_file))
 
-        repo = git.Repo(".")
-        if repo.is_dirty():
-            print("Refusing to run with uncommitted changes. Please commit them first.")
-            return
+        self.board_score.fit([board_tensors, extra_tensors], target_tensors,
+                             nb_epoch=1000, callbacks=self.callbacks,
+                             batch_size=self.batch_size, validation_split=0.1)
 
-        savedir = 'logs/' + str(datetime.now()) + " " + repo.git.describe("--always", "--dirty", "--long")
-        tbcb = TensorBoard(log_dir=savedir, histogram_freq=0, write_graph=True, write_images=False)
-        mccb = ModelCheckpoint(savedir+'/model.{epoch:04d}-{val_loss:.2f}.hdf5', monitor='val_loss', save_best_only=True)
-        cb = [tbcb, mccb]
+    def train_on_data_directory(self, data_dir):
+        train_dir = os.path.join(data_dir, 'train')
+        val_dir = os.path.join(data_dir, 'validate')
 
-        self.board_score.fit([board_tensors, extra_tensors], target_tensors, nb_epoch=1000, callbacks=cb,
-                             batch_size=4096, validation_split=0.1)
+        train_gen = DataDirGenerator(train_dir, self.batch_size)
+        val_gen = DataDirGenerator(val_dir, self.batch_size)
+
+        self.board_score.fit_generator(
+            train_gen.generate_samples(), train_gen.samples_per_epoch,
+            nb_epoch=1000, callbacks=self.callbacks,
+            validation_data=val_gen.generate_samples(), nb_val_samples=val_gen.samples_per_epoch,
+            max_q_size=10, nb_worker=1, pickle_safe=True
+        )
 
 
 def main():
-    #pp = Preprocessor('gorgobase-2500.pgn')
-    #pp.process_pgn_file()
-
     net = ChessNet()
-    net.train_on_games('gorgobase-2500-moves.npz')
+    net.train_on_data_directory(sys.argv[1])
 
 if __name__ == '__main__':
     main()
