@@ -74,7 +74,7 @@ class ChessNet:
         #     return
         savedir = 'logs/' + str(datetime.now()) + " " + repo.git.describe("--always", "--dirty", "--long")
         tbcb = TensorBoard(log_dir=savedir, histogram_freq=0, write_graph=True, write_images=False)
-        mccb = ModelCheckpoint(savedir+'/model.{epoch:04d}-{val_loss:.2f}.hdf5',
+        mccb = ModelCheckpoint(savedir+'/model.{epoch:04d}-{loss:.4f}-{acc:.2f}-{rel_acc:.2f}-{val_loss:.4f}-{val_acc:.2f}-{val_rel_acc:.2f}.hdf5',
                                monitor='val_loss', save_best_only=False)
         self.callbacks = [tbcb, mccb]
 
