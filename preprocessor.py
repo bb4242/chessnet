@@ -39,11 +39,12 @@ class GameProcessWorker(multiprocessing.Process):
 class Accumulator:
     """Accumulates tensor results and writes them to disk in chunks of constant size"""
 
-    def __init__(self, output_dir, chunk_size=2**20):
+    def __init__(self, output_dir, chunk_size=2**20, shuffle=False):
         self.chunk_size = chunk_size
         self.output_dir = output_dir
         os.makedirs(output_dir)
 
+        self.shuffle = shuffle
         self.cur_idx = 0
         self.file_idx = 0
         self.board_tensors = np.zeros((chunk_size, 64), dtype='uint8')
@@ -71,10 +72,15 @@ class Accumulator:
         self.file_idx += 1
 
         # Shuffle data
-        permutation = np.random.permutation(self.cur_idx)
-        board_tensors = self.board_tensors[permutation]
-        extra_tensors = self.extra_tensors[permutation]
-        target_tensors = self.target_tensors[permutation]
+        if self.shuffle:
+            permutation = np.random.permutation(self.cur_idx)
+            board_tensors = self.board_tensors[permutation]
+            extra_tensors = self.extra_tensors[permutation]
+            target_tensors = self.target_tensors[permutation]
+        else:
+            board_tensors = self.board_tensors[:self.cur_idx]
+            extra_tensors = self.extra_tensors[:self.cur_idx]
+            target_tensors = self.target_tensors[:self.cur_idx]
 
         # Write file
         save_file = os.path.join(self.output_dir, '{:06d}.npz'.format(self.file_idx))
