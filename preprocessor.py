@@ -1,14 +1,16 @@
+#!/usr/bin/python
+
 import chess
 import chess.pgn
-import chess.svg
 
 import numpy as np
 import os
 import multiprocessing
 from time import time
 import queue
-import pickle
 import sys
+from glob import glob
+import shutil
 
 # This is necessary to prevent pickling errors when sending chess.Game objects to the workers
 sys.setrecursionlimit(20000)
@@ -34,6 +36,56 @@ class GameProcessWorker(multiprocessing.Process):
                 self.processed_game_count.value += 1
             self.game_queue.task_done()
 
+class Accumulator:
+    """Accumulates tensor results and writes them to disk in chunks of constant size"""
+
+    def __init__(self, output_dir, chunk_size=2**20):
+        self.chunk_size = chunk_size
+        self.output_dir = output_dir
+        os.makedirs(output_dir)
+
+        self.cur_idx = 0
+        self.file_idx = 0
+        self.board_tensors = np.zeros((chunk_size, 64), dtype='uint8')
+        self.extra_tensors = np.zeros((chunk_size, 5),  dtype='uint8')
+        self.target_tensors = np.zeros(chunk_size, dtype='uint8')
+
+    def push(self, res_board, res_extra, res_target):
+        n_avail = len(res_board)
+        n_pushed = min(self.chunk_size - self.cur_idx, n_avail)
+
+        i = self.cur_idx
+        j = self.cur_idx + n_pushed
+        self.board_tensors[i:j] = res_board[:n_pushed]
+        self.extra_tensors[i:j] = res_extra[:n_pushed]
+        self.target_tensors[i:j] = res_target[:n_pushed]
+        self.cur_idx += n_pushed
+
+        if self.cur_idx == self.chunk_size:
+            self.flush()
+
+        if n_avail - n_pushed > 0:
+            self.push(res_board[n_pushed:], res_extra[n_pushed:], res_target[n_pushed:])
+
+    def flush(self):
+        self.file_idx += 1
+
+        # Shuffle data
+        permutation = np.random.permutation(self.cur_idx)
+        board_tensors = self.board_tensors[permutation]
+        extra_tensors = self.extra_tensors[permutation]
+        target_tensors = self.target_tensors[permutation]
+
+        # Write file
+        save_file = os.path.join(self.output_dir, '{:06d}.npz'.format(self.file_idx))
+        np.savez_compressed(save_file, board_tensors=board_tensors,
+                            extra_tensors=extra_tensors,
+                            target_tensors=target_tensors)
+
+        print("Wrote {} moves to {}".format(len(board_tensors), save_file))
+        self.cur_idx = 0
+
+
 class Preprocessor:
 
     PIECES = [None] + [chess.Piece(piece_type, color)
@@ -42,8 +94,18 @@ class Preprocessor:
                                           chess.ROOK, chess.QUEEN, chess.KING]]
     PIECE_DICT = {piece: idx for idx, piece in enumerate(PIECES)}
 
-    def __init__(self, pgn_file):
+    def __init__(self, pgn_file, chunk_size=2**20, train_frac=0.8, val_frac=0.1):
+        """
+        :param pgn_file: Path to the PGN file to process
+        :param chunk_size: Number of moves to write per file
+        :param train_frac, val_frac: Fraction of the data to use for training and validation sets.
+        If these sum to less than 1, an additional test set will be created
+        from the remainder
+        """
         self.pgn_file = pgn_file
+        self.chunk_size = chunk_size
+        self.train_frac = train_frac
+        self.val_frac = val_frac
 
     @classmethod
     def board_to_tensor(cls, board):
@@ -90,16 +152,24 @@ class Preprocessor:
         result_queue = multiprocessing.Queue(500)
         workers = [GameProcessWorker(game_queue, result_queue, processed_game_count)
                    for i in range(multiprocessing.cpu_count())]
-        for w in workers:
-            w.start()
+        [w.start() for w in workers]
 
-        # Read PGN file
-        game_data = []
+        # Read PGN file games in a random order
         pgn_file = open(self.pgn_file)
+        print("Reading PGN game offsets")
+        game_offsets = np.array(list(chess.pgn.scan_offsets(pgn_file)))
+        np.random.shuffle(game_offsets)
+        n_games = len(game_offsets)
+        print("Found {} games".format(n_games))
+
+        moves_dir = os.path.splitext(self.pgn_file)[0] + '-moves'
+        move_acc = Accumulator(moves_dir, self.chunk_size)
         games_in = 0
+        games_in_flight = 0
         next_print = time()
         start_time = next_print
-        while True:
+
+        for offset in game_offsets:
             now = time()
             if now > next_print:
                 next_print = now + 1
@@ -107,46 +177,50 @@ class Preprocessor:
                 gps = processed_game_count.value / elapsed_time
                 print("Processed {:8d} games in {:8.1f} sec ({:8.1f} games/sec)".format(processed_game_count.value, elapsed_time, gps))
 
+            # Accumulate and write to disk already processed results
             while True:
                 try:
-                    game_data.append(result_queue.get_nowait())
+                    move_acc.push(*result_queue.get_nowait())
+                    games_in_flight -= 1
                 except queue.Empty:
                     break
 
+            # Read and queue the next game for processing
+            pgn_file.seek(offset)
             game = chess.pgn.read_game(pgn_file)
-            if game is None:
-                break
             if len(game.errors) == 0 and 'SetUp' not in game.headers and len(list(game.main_line())) > 0:
                 game_queue.put(game)
                 games_in += 1
+                games_in_flight += 1
+
+        # Accumulate remaining games in flight
+        for _ in xrange(games_in_flight):
+            move_acc.push(*result_queue.get())
+
+        # Flush any remaining moves to disk
+        move_acc.flush()
+
+        # Move files into train/validate/test sets
+        npz_files = sorted(glob(moves_dir + '/*.npz'))
+        n_files = len(npz_files)
+        train_idx = int(n_files*self.train_frac)
+        val_idx = train_idx + int(n_files*self.val_frac)
+
+        dirs = [os.path.join(moves_dir, d) for d in ['train', 'validate', 'test']]
+        [os.makedirs(d) for d in dirs]
+        set_files = np.split(npz_files, [train_idx, val_idx])
+        for dest_dir, files in zip(dirs, set_files):
+            for f in files:
+                shutil.move(f, dest_dir)
 
         # Tell workers to shut down
         [game_queue.put(None) for _ in range(len(workers))]
         game_queue.join()
-        print "SHUTDOWN"
+        [w.join() for w in workers]
 
-        # Aggregate data and write to file
-        for _ in xrange(games_in - len(game_data)):
-            game_data.append(result_queue.get())
 
-        assert len(game_data) == games_in
-        print("Total games: {}".format(games_in))
+def main():
+    Preprocessor(sys.argv[1]).process_pgn_file()
 
-        board_tensors = np.concatenate([gd[0] for gd in game_data])
-        extra_tensors = np.concatenate([gd[1] for gd in game_data])
-        target_tensors = np.concatenate([gd[2] for gd in game_data])
-
-        n_samples = len(board_tensors)
-        permutation = np.random.permutation(n_samples)
-        board_tensors = board_tensors[permutation]
-        extra_tensors = extra_tensors[permutation]
-        target_tensors = target_tensors[permutation]
-
-        save_file = os.path.splitext(self.pgn_file)[0] + '-moves.npz'
-        np.savez_compressed(save_file, board_tensors=board_tensors,
-                            extra_tensors=extra_tensors,
-                            target_tensors=target_tensors)
-
-        print("Wrote {}".format(save_file))
-        print("Total moves: {}".format(n_samples))
-        print("Good/bad move ratio (should be 0.5): {}".format(np.mean(target_tensors)))
+if __name__ == '__main__':
+    main()
