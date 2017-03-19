@@ -26,6 +26,7 @@ from twisted.protocols import basic
 from mekk.fics import fics_connector, fics_client
 from mekk.fics.datatypes import UnknownReply
 import chess
+import chessnet
 
 import logging
 
@@ -53,7 +54,7 @@ NOT_PARSED_REPLIES_FILE="not-parsed-replies.txt"
 
 class MyFicsClient(fics_client.FicsClient):
 
-    def __init__(self, console):
+    def __init__(self, console, model):
         super(MyFicsClient, self).__init__(label="My connection")
         self.interface_variables_to_set_after_login = [
             ]
@@ -62,6 +63,7 @@ class MyFicsClient(fics_client.FicsClient):
             'open': 1
         }
         self.console = console
+        self.model = model
 
     @defer.inlineCallbacks
     def on_login(self, user):
@@ -83,13 +85,13 @@ class MyFicsClient(fics_client.FicsClient):
 
     @defer.inlineCallbacks
     def move(self, board):
-        moves = list(board.legal_moves)
-        print("Valid moves are: {}".format(list(moves)))
-
         try:
-            selected = random.choice(moves)
+            analysis = self.model.analyze_position(board)
+            print("Position analysis:")
+            print(board)
+            pprint.pprint(analysis)
+            selected = self.model.select_move(board, stochastic=False)
             result = yield self.run_command(str(selected))
-            print "REG RESULT {}".format(result)
 
             self.tell_to(self.opponent_name, "Here I go!")
         except:
@@ -210,8 +212,9 @@ if __name__ == "__main__":
         log_level=logging.WARN
     logging.basicConfig(level=log_level)
 
+    cn = chessnet.ChessNet(load_model_filename=sys.argv[1])
     my_console = MyConsoleProtocol()
-    my_client = MyFicsClient(my_console)
+    my_client = MyFicsClient(my_console, cn)
     reactor.connectTCP(
         FICS_HOST, FICS_PORT,
         fics_connector.FicsFactory(client=my_client,

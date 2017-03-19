@@ -7,7 +7,7 @@ import numpy as np
 import os
 import multiprocessing
 from time import time
-import queue
+import Queue
 import sys
 from glob import glob
 import shutil
@@ -188,7 +188,7 @@ class Preprocessor:
                 try:
                     move_acc.push(*result_queue.get_nowait())
                     games_in_flight -= 1
-                except queue.Empty:
+                except Queue.Empty:
                     break
 
             # Read and queue the next game for processing
