@@ -9,7 +9,7 @@ import numpy as np
 import git
 
 from keras.layers import Input, Dense, Flatten, BatchNormalization, Dropout, Lambda, merge, Merge, Embedding
-from keras.models import Model, Sequential
+from keras.models import load_model, Sequential
 from keras.callbacks import TensorBoard, ModelCheckpoint
 import keras.backend as K
 
@@ -64,9 +64,14 @@ class DataDirGenerator:
 
 class ChessNet:
 
-    def __init__(self, batch_size=4096):
+    def __init__(self, batch_size=4096, load_model_filename=None):
         self.batch_size = batch_size
-        self.board_score = self.initialize_model()
+
+        if load_model_filename is not None:
+            print("Loading saved model from {}".format(load_model_filename))
+            self.board_score = load_model(load_model_filename, custom_objects={'rel_acc': rel_acc})
+        else:
+            self.board_score = self.initialize_model()
 
         repo = git.Repo(".")
         # if repo.is_dirty():
@@ -168,6 +173,45 @@ class ChessNet:
             max_q_size=1000, nb_worker=1, pickle_safe=True
         )
 
+    def analyze_position(self, board):
+        """Given a game board, analyze the position by evaluating the network on the legal moves
+        Returns a list of (score, move) tuples, sorted from highest to lowest score, where
+        the sum of scores is 1.
+        """
+
+        # Get the encoded boards reachable via legal moves from this position
+        next_board_tensors = []
+        next_extra_tensors = []
+        moves = list(board.legal_moves)
+        for move in moves:
+            board.push(move)
+            nbt, net = Preprocessor.board_to_tensor(board)
+            board.pop()
+            next_board_tensors.append(nbt)
+            next_extra_tensors.append(net)
+        next_board_tensors = np.array(next_board_tensors)
+        next_extra_tensors = np.array(next_extra_tensors)
+
+        # Evaluate the network on the reachable moves
+        scores = self.board_score.predict([next_board_tensors, next_extra_tensors])[:, 0]
+
+        # Convert scores to a probability distribution
+        scores_dist = scores / np.sum(scores)
+
+        return sorted(zip(scores_dist, moves), reverse=True)
+
+    def select_move(self, board, stochastic=True):
+        """Choose a move given the current position.
+        If stochastic is True, we will select a move according to the multinomial distribution
+        returned by analyze_position; otherwise, we will deterministically select the move with
+        the highest probability.
+        """
+        scores = self.analyze_position(board)
+        if stochastic:
+            selected_idx = np.argmax(np.random.multinomial(1, [s[0] for s in scores]))
+            return scores[selected_idx][1]
+        else:
+            return scores[0][1]
 
 def main():
     net = ChessNet()
