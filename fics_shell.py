@@ -20,6 +20,7 @@ patch.
 import pprint
 import sys
 import random
+import time
 
 from twisted.internet import stdio, reactor, defer
 from twisted.protocols import basic
@@ -38,7 +39,7 @@ from mekk.fics import FICS_HOST, FICS_PORT
 
 #FICS_HOST='localhost' # proxy
 
-FICS_USER='guest'
+FICS_USER='GuestCNBOT'
 FICS_PASSWORD=''
 
 # TODO
@@ -77,7 +78,6 @@ class MyFicsClient(fics_client.FicsClient):
     @defer.inlineCallbacks
     def on_fics_information(self, what, args):
         if what == 'game_move':
-            print("Got Style12: {}".format(args.style12))
             board = chess.Board(args.style12.fen)
             yield self.move(board)
 
@@ -87,13 +87,16 @@ class MyFicsClient(fics_client.FicsClient):
     def move(self, board):
         try:
             analysis = self.model.analyze_position(board)
-            print("Position analysis:")
             print(board)
-            pprint.pprint(analysis)
             selected = self.model.select_move(board, stochastic=False)
             result = yield self.run_command(str(selected))
 
-            self.tell_to(self.opponent_name, "Here I go!")
+            self.tell_to(self.opponent_name, "Here are the top moves I considered:")
+            for score, move in analysis[:5]:
+                move_str = '{} {:.2f}'.format(board.san(move), score)
+                print(move_str)
+                self.tell_to(self.opponent_name, move_str)
+
         except:
             pass
 
@@ -114,10 +117,15 @@ class MyFicsClient(fics_client.FicsClient):
 
             if self.me_white:
                 self.opponent_name = result2.black_name
-                self.tell_to(self.opponent_name, "Greetings!")
-                yield self.move(chess.Board())
             else:
                 self.opponent_name = result2.white_name
+
+            time.sleep(3)
+            self.tell_to(self.opponent_name, "Hello! This is ChessNet bot")
+            self.tell_to(self.opponent_name, "Model info: {}".format(self.model.name))
+
+            if self.me_white:
+                yield self.move(chess.Board())
 
         yield self.console.show_unknown(what)
 

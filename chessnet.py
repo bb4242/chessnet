@@ -69,8 +69,10 @@ class ChessNet:
 
         if load_model_filename is not None:
             print("Loading saved model from {}".format(load_model_filename))
+            self.name = os.path.basename(load_model_filename)
             self.board_score = load_model(load_model_filename, custom_objects={'rel_acc': rel_acc})
         else:
+            self.name = ""
             self.board_score = self.initialize_model()
 
         repo = git.Repo(".")
