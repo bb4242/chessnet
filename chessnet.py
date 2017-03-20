@@ -87,7 +87,7 @@ class ChessNet:
 
 
     def initialize_model(self):
-        n = 1024
+        n = 512
         n_pieces = len(Preprocessor.PIECES)
 
         # One hot encoding of the board, one class per piece type
@@ -158,7 +158,7 @@ class ChessNet:
         print("Loaded from {}".format(npz_file))
 
         self.board_score.fit([board_tensors, extra_tensors], target_tensors,
-                             nb_epoch=1000, callbacks=self.callbacks,
+                             nb_epoch=1000, callbacks=self.callbacks, shuffle=False,
                              batch_size=self.batch_size, validation_split=0.1)
 
     def train_on_data_directory(self, data_dir):
@@ -216,7 +216,7 @@ class ChessNet:
             return scores[0][1]
 
 def main():
-    net = ChessNet()
+    net = ChessNet(4096*4)
     net.train_on_data_directory(sys.argv[1])
 
 if __name__ == '__main__':
