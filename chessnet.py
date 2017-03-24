@@ -4,7 +4,7 @@ from datetime import datetime
 import sys
 import os
 from glob import glob
-
+import click
 import numpy as np
 import git
 
@@ -30,9 +30,13 @@ def rel_acc(y_true, y_pred):
 
 class DataDirGenerator:
 
-    def __init__(self, data_dir, batch_size):
-        self.data_dir = data_dir
-        self.npz_files = sorted(glob(data_dir + '/*.npz'))
+    def __init__(self, data_dirs, batch_size):
+        self.npz_files = []
+        for data_dir in data_dirs:
+            self.npz_files += glob(data_dir + '/*.npz')
+        self.npz_files = np.array(self.npz_files)
+        np.random.shuffle(self.npz_files)
+
         self.batch_size = batch_size
         n_files = len(self.npz_files)
 
@@ -41,7 +45,7 @@ class DataDirGenerator:
         for fi, f in enumerate(self.npz_files):
             print("Scanning {} ({}/{})".format(f, fi+1, n_files))
             self.n_batches += len(np.load(f)['board_tensors']) / batch_size
-        print("Total mini-batches in {}: {}".format(data_dir, self.n_batches))
+        print("Total mini-batches in {}: {}".format(data_dirs, self.n_batches))
 
     @property
     def samples_per_epoch(self):
@@ -87,7 +91,7 @@ class ChessNet:
 
 
     def initialize_model(self):
-        n = 512
+        n = 1024
         n_pieces = len(Preprocessor.PIECES)
 
         # One hot encoding of the board, one class per piece type
@@ -161,12 +165,12 @@ class ChessNet:
                              nb_epoch=1000, callbacks=self.callbacks, shuffle=False,
                              batch_size=self.batch_size, validation_split=0.1)
 
-    def train_on_data_directory(self, data_dir):
-        train_dir = os.path.join(data_dir, 'train')
-        val_dir = os.path.join(data_dir, 'validate')
+    def train_on_data_directories(self, data_dirs):
+        train_dirs = [os.path.join(data_dir, 'train') for data_dir in data_dirs]
+        val_dirs = [os.path.join(data_dir, 'validate') for data_dir in data_dirs]
 
-        train_gen = DataDirGenerator(train_dir, self.batch_size)
-        val_gen = DataDirGenerator(val_dir, self.batch_size)
+        train_gen = DataDirGenerator(train_dirs, self.batch_size)
+        val_gen = DataDirGenerator(val_dirs, self.batch_size)
 
         self.board_score.fit_generator(
             train_gen.generate_samples(), train_gen.samples_per_epoch,
@@ -215,9 +219,12 @@ class ChessNet:
         else:
             return scores[0][1]
 
-def main():
-    net = ChessNet(4096*4)
-    net.train_on_data_directory(sys.argv[1])
+@click.command()
+@click.option('--load', prompt='Start training with the weights saved in the given model')
+@click.argument('training_dirs', nargs=-1)
+def main(load, training_dirs):
+    net = ChessNet(4096*4, load)
+    net.train_on_data_directories(training_dirs)
 
 if __name__ == '__main__':
     main()

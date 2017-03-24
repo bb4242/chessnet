@@ -4,3 +4,4 @@ keras==1.2.2
 tensorflow-gpu==1.0.1
 python-chess==0.17.0
 h5py==2.6.0
+click==6.7
