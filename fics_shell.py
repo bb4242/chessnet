@@ -1,3 +1,4 @@
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # TODO: after implementing and polishing move to scripts
@@ -88,7 +89,7 @@ class MyFicsClient(fics_client.FicsClient):
         try:
             analysis = self.model.analyze_position(board)
             print(board)
-            selected = self.model.select_move(board, stochastic=False)
+            selected, _ = self.model.select_move(board)
             result = yield self.run_command(str(selected))
 
             self.tell_to(self.opponent_name, "Here are the top moves I considered:")

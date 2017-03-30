@@ -8,12 +8,13 @@ import click
 import numpy as np
 import git
 
-from keras.layers import Input, Dense, Flatten, BatchNormalization, Dropout, Lambda, merge, Merge, Embedding
+from keras.layers import Dense, Flatten, BatchNormalization, Dropout, Merge, Embedding
 from keras.models import load_model, Sequential
 from keras.callbacks import TensorBoard, ModelCheckpoint
 import keras.backend as K
 
 from preprocessor import Preprocessor
+from engine import ChessEngine
 
 
 def rel_acc(y_true, y_pred):
@@ -66,10 +67,11 @@ class DataDirGenerator:
                         target_tensors[start:end]
                     )
 
-class ChessNet:
+class ChessNet(ChessEngine):
 
-    def __init__(self, batch_size=4096, load_model_filename=None):
+    def __init__(self, batch_size=4096, load_model_filename=None, move_temp=0.05):
         self.batch_size = batch_size
+        self.move_temp = move_temp
 
         if load_model_filename is not None:
             print("Loading saved model from {}".format(load_model_filename))
@@ -79,11 +81,15 @@ class ChessNet:
             self.name = ""
             self.board_score = self.initialize_model()
 
-        repo = git.Repo(".")
-        # if repo.is_dirty():
-        #     print("Refusing to run with uncommitted changes. Please commit them first.")
-        #     return
-        savedir = 'logs/' + str(datetime.now()) + " " + repo.git.describe("--always", "--dirty", "--long")
+        try:
+            repo = git.Repo(".")
+            # if repo.is_dirty():
+            #     print("Refusing to run with uncommitted changes. Please commit them first.")
+            #     return
+            ver_str = repo.git.describe("--always", "--dirty", "--long")
+        except:
+            ver_str = 'unknown'
+        savedir = 'logs/' + str(datetime.now()) + " " + ver_str
         tbcb = TensorBoard(log_dir=savedir, histogram_freq=0, write_graph=True, write_images=False)
         mccb = ModelCheckpoint(savedir+'/model.{epoch:04d}-{loss:.4f}-{acc:.2f}-{rel_acc:.2f}-{val_loss:.4f}-{val_acc:.2f}-{val_rel_acc:.2f}.hdf5',
                                monitor='val_loss', save_best_only=False)
@@ -202,22 +208,22 @@ class ChessNet:
         scores = self.board_score.predict([next_board_tensors, next_extra_tensors])[:, 0]
 
         # Convert scores to a probability distribution
-        scores_dist = scores / np.sum(scores)
+        scores_dist = np.exp(scores/self.move_temp)
+        scores_dist /= np.sum(scores_dist)
 
         return sorted(zip(scores_dist, moves), reverse=True)
 
-    def select_move(self, board, stochastic=True):
-        """Choose a move given the current position.
-        If stochastic is True, we will select a move according to the multinomial distribution
-        returned by analyze_position; otherwise, we will deterministically select the move with
-        the highest probability.
+    def select_move(self, board):
+        """Choose a move for the current position, according to the multinomial distribution
+        returned by analyze_position.
         """
         scores = self.analyze_position(board)
-        if stochastic:
-            selected_idx = np.argmax(np.random.multinomial(1, [s[0] for s in scores]))
-            return scores[selected_idx][1]
-        else:
-            return scores[0][1]
+        # Work around a numpy multinomial quirk; put the highest probability move
+        # at the end of the list to avoid "ValueError: sum(pvals[:-1]) > 1.0" errors
+        scores.reverse()
+        selected_idx = np.argmax(np.random.multinomial(1, [s[0] for s in scores]))
+        return scores[selected_idx][1], {}
+
 
 @click.command()
 @click.option('--load', prompt='Start training with the weights saved in the given model')
