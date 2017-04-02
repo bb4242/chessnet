@@ -1,5 +1,7 @@
 #!/usr/bin/python
 
+import click
+
 import chess
 import chess.pgn
 
@@ -39,7 +41,7 @@ class GameProcessWorker(multiprocessing.Process):
 class Accumulator:
     """Accumulates tensor results and writes them to disk in chunks of constant size"""
 
-    def __init__(self, output_dir, chunk_size=2**20, shuffle=False):
+    def __init__(self, output_dir, chunk_size=2**20, shuffle=True):
         self.chunk_size = chunk_size
         self.output_dir = output_dir
         os.makedirs(output_dir)
@@ -73,7 +75,9 @@ class Accumulator:
 
         # Shuffle data
         if self.shuffle:
-            permutation = np.random.permutation(self.cur_idx)
+            # Permute elements in adjacent pairs to allow for relative accuracy calcs
+            # which rely on having a selected and not-selected move adjacent to each other
+            permutation = np.array([[2*i, 2*i+1] for i in np.random.permutation(self.cur_idx/2)]).flatten()
             board_tensors = self.board_tensors[permutation]
             extra_tensors = self.extra_tensors[permutation]
             target_tensors = self.target_tensors[permutation]
@@ -88,7 +92,7 @@ class Accumulator:
                             extra_tensors=extra_tensors,
                             target_tensors=target_tensors)
 
-        print("Wrote {} moves to {}".format(len(board_tensors), save_file))
+        print("Wrote {} moves (shuffle={}) to {}".format(len(board_tensors), self.shuffle, save_file))
         self.cur_idx = 0
 
 
@@ -224,9 +228,11 @@ class Preprocessor:
         game_queue.join()
         [w.join() for w in workers]
 
-
-def main():
-    Preprocessor(sys.argv[1]).process_pgn_file()
+@click.command()
+@click.option('--chunk-size', '-s', default=2**20, help='Chunk size of the saved files')
+@click.argument('pgn-file')
+def main(chunk_size, pgn_file):
+    Preprocessor(pgn_file, chunk_size=chunk_size).process_pgn_file()
 
 if __name__ == '__main__':
     main()
