@@ -144,6 +144,8 @@ class ChessNet(ChessEngine):
 
 
         board_score.add(Flatten())
+        board_score.add(Dense(n, activation='relu'))
+        board_score.add(Dense(n, activation='relu'))
         board_score.add(Dense(1, activation='sigmoid'))
 
         board_score.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy', rel_acc])
