@@ -8,7 +8,7 @@ import click
 import numpy as np
 import git
 
-from keras.layers import Dense, Flatten, BatchNormalization, Dropout, Merge, Embedding
+from keras.layers import Dense, Convolution2D, Flatten, BatchNormalization, Dropout, Merge, Embedding, RepeatVector, Reshape, MaxPooling2D
 from keras.models import load_model, Sequential
 from keras.callbacks import TensorBoard, ModelCheckpoint
 import keras.backend as K
@@ -69,7 +69,7 @@ class DataDirGenerator:
 
 class ChessNet(ChessEngine):
 
-    def __init__(self, batch_size=4096, load_model_filename=None, move_temp=0.05):
+    def __init__(self, batch_size=4096, load_model_filename=None, move_temp=0.05, log=True):
         self.batch_size = batch_size
         self.move_temp = move_temp
 
@@ -83,74 +83,67 @@ class ChessNet(ChessEngine):
 
         try:
             repo = git.Repo(".")
-            # if repo.is_dirty():
-            #     print("Refusing to run with uncommitted changes. Please commit them first.")
-            #     return
             ver_str = repo.git.describe("--always", "--dirty", "--long")
         except:
             ver_str = 'unknown'
-        savedir = 'logs/' + str(datetime.now()) + " " + ver_str
-        tbcb = TensorBoard(log_dir=savedir, histogram_freq=0, write_graph=True, write_images=False)
-        mccb = ModelCheckpoint(savedir+'/model.{epoch:04d}-{loss:.4f}-{acc:.2f}-{rel_acc:.2f}-{val_loss:.4f}-{val_acc:.2f}-{val_rel_acc:.2f}.hdf5',
-                               monitor='val_loss', save_best_only=False)
-        self.callbacks = [tbcb, mccb]
+
+        if log:
+            savedir = 'logs/' + str(datetime.now()) + " " + ver_str
+            tbcb = TensorBoard(log_dir=savedir, histogram_freq=0, write_graph=True, write_images=False)
+            mccb = ModelCheckpoint(savedir+'/model.{epoch:04d}-{loss:.4f}-{acc:.2f}-{rel_acc:.2f}-{val_loss:.4f}-{val_acc:.2f}-{val_rel_acc:.2f}.hdf5',
+                                   monitor='val_loss', save_best_only=False)
+            self.callbacks = [tbcb, mccb]
+        else:
+            self.callbacks = []
 
 
     def initialize_model(self):
-        n = 1024
+        n = 64
         n_pieces = len(Preprocessor.PIECES)
 
         # One hot encoding of the board, one class per piece type
         board_one_hot = Sequential()
         board_one_hot.add(Embedding(n_pieces, n_pieces, input_length=64, weights=[np.eye(n_pieces)], trainable=False))
-        board_one_hot.add(Flatten())
-        board_one_hot.add(BatchNormalization())
+        board_one_hot.add(Reshape((8, 8, n_pieces)))
 
         # Encoding for extra board state (player turn, castling info, etc)
         extra = Sequential()
-        extra.add(BatchNormalization(input_shape=(5, )))
+        extra.add(RepeatVector(64, input_shape=(5, )))
+        extra.add(Reshape((8, 8, 5)))
 
         # Merge all inputs
         board_score = Sequential()
-        merged_layer = Merge([board_one_hot, extra], mode='concat')
-        board_score.add(merged_layer)
+        board_score.add(Merge([board_one_hot, extra], mode='concat'))
 
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
+        board_score.add(Convolution2D(n, 3, 3, activation='relu', border_mode='same'))
+        board_score.add(Convolution2D(n, 3, 3, activation='relu', border_mode='same'))
         board_score.add(BatchNormalization())
-        board_score.add(Dropout(0.2))
+#        board_score.add(Dropout(0.2))
 
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
+        board_score.add(Convolution2D(n, 3, 3, activation='relu', border_mode='same'))
+        board_score.add(Convolution2D(n, 3, 3, activation='relu', border_mode='same'))
         board_score.add(BatchNormalization())
-        board_score.add(Dropout(0.2))
+#        board_score.add(Dropout(0.2))
 
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
+#        board_score.add(MaxPooling2D((2, 2)))
+
+        board_score.add(Convolution2D(n, 3, 3, activation='relu', border_mode='same'))
+        board_score.add(Convolution2D(n, 3, 3, activation='relu', border_mode='same'))
         board_score.add(BatchNormalization())
-        board_score.add(Dropout(0.2))
+#        board_score.add(Dropout(0.2))
 
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
+        board_score.add(Convolution2D(n, 3, 3, activation='relu', border_mode='same'))
+        board_score.add(Convolution2D(n, 3, 3, activation='relu', border_mode='same'))
         board_score.add(BatchNormalization())
-        board_score.add(Dropout(0.2))
+#        board_score.add(Dropout(0.2))
 
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
+        board_score.add(Convolution2D(n, 3, 3, activation='relu', border_mode='same'))
+        board_score.add(Convolution2D(n, 3, 3, activation='relu', border_mode='same'))
         board_score.add(BatchNormalization())
-        board_score.add(Dropout(0.2))
+#        board_score.add(Dropout(0.2))
 
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(Dense(n, activation='relu'))
-        board_score.add(BatchNormalization())
-        board_score.add(Dropout(0.2))
 
+        board_score.add(Flatten())
         board_score.add(Dense(1, activation='sigmoid'))
 
         board_score.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy', rel_acc])
@@ -226,10 +219,11 @@ class ChessNet(ChessEngine):
 
 
 @click.command()
-@click.option('--load', prompt='Start training with the weights saved in the given model')
+@click.option('--load', '-l', default=None, help='Start training with the weights saved in the given model')
+@click.option('--log/--no-log', default=True, help="Don't write log file (for testing purposes)")
 @click.argument('training_dirs', nargs=-1)
-def main(load, training_dirs):
-    net = ChessNet(4096*4, load)
+def main(load, log, training_dirs):
+    net = ChessNet(2048, load, log=log)
     net.train_on_data_directories(training_dirs)
 
 if __name__ == '__main__':
