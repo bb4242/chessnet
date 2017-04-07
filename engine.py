@@ -4,6 +4,7 @@ import multiprocessing
 import chess
 import chess.uci
 
+from preprocessor import Preprocessor
 
 class ChessEngine:
     """Abstract class that encapsulates a chess playing engine"""
@@ -67,7 +68,7 @@ class EngineMatchup:
     def __init__(self, engine1, engine2):
         self.engines = [engine1, engine2]
 
-    def play_match(self, engine1_white=True):
+    def play_match(self, engine1_white=True, verbose=False):
         """Play a match between the two engines, and return the result
         from engine1's perspective: 1 for a win, 0 for a draw, -1 for a loss
         """
@@ -76,26 +77,21 @@ class EngineMatchup:
         engine_to_move_idx = 0 if engine1_white else 1
 
         while not board.is_game_over():
-            print self.engines[engine_to_move_idx]
             move, extra = self.engines[engine_to_move_idx].select_move(board)
             san = board.san(move)
             board.push(move)
             engine_to_move_idx = (engine_to_move_idx + 1) % 2
 
-            print board.fullmove_number, san
-            print extra
-            print board
-            print
+            if verbose:
+                print self.engines[engine_to_move_idx]
+                print board.fullmove_number, san
+                print extra
+                print board
+                print
 
-        result_str = board.result()
-        if result_str == '1-0':
-            result = 1
-        elif result_str == '0-1':
-            result = -1
-        else:
-            result = 0
+        result = Preprocessor.numerical_result(board.result(), engine1_white)
 
         if not engine1_white:
             result *= -1
 
-        return result
+        return result, board

@@ -127,8 +127,22 @@ class Preprocessor:
         ], dtype='uint8')
         return board_tensor, extra_state_tensor
 
+    @staticmethod
+    def numerical_result(result_str, color):
+        if result_str == '1-0':
+            result = 1
+        elif result_str == '0-1':
+            result = -1
+        else:
+            result = 0
+        cmult = 1 if color==chess.WHITE else -1
+        return 0.5*(result*cmult + 1)
+
+    PROCESS_MODE_NORMAL=0
+    PROCESS_MODE_RL=1
+
     @classmethod
-    def process_game(cls, game):
+    def process_game(cls, game, mode=PROCESS_MODE_NORMAL, rl_color=chess.WHITE):
         b = chess.Board()
         board_tensors = []
         extra_tensors = []
@@ -142,15 +156,28 @@ class Preprocessor:
             targets.append(target)
             b.pop()
 
+        result_target = cls.numerical_result(game.headers['Result'], rl_color)
+
         for selected_move in game.main_line():
-            # Get a random legal move that was not selected
-            legal_moves = np.array(list(b.legal_moves))
-            np.random.shuffle(legal_moves)
-            for legal_move in legal_moves:
-                if legal_move != selected_move:
-                    _add(legal_move, 0)
-                    _add(selected_move, 1)
-                    break
+
+            if mode == cls.PROCESS_MODE_NORMAL:
+                # Get a random legal move that was not selected
+                legal_moves = np.array(list(b.legal_moves))
+                np.random.shuffle(legal_moves)
+                for legal_move in legal_moves:
+                    if legal_move != selected_move:
+                        _add(legal_move, 0)
+                        _add(selected_move, 1)
+                        break
+
+            elif mode == cls.PROCESS_MODE_RL:
+                # In RL mode, the targets are set relative to who won the game
+                # from the perspective of the RL player (denoted by rl_color)
+                if b.turn == rl_color:
+                    _add(selected_move, result_target)
+                else:
+                    _add(selected_move, 1 - result_target)
+
             b.push(selected_move)
         return np.array(board_tensors), np.array(extra_tensors), np.array(targets)
 
