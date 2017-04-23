@@ -87,16 +87,17 @@ class MyFicsClient(fics_client.FicsClient):
     @defer.inlineCallbacks
     def move(self, board):
         try:
-            analysis = self.model.analyze_position(board)
+            selected, info = self.model.select_move(board, 4)
             print(board)
-            selected, _ = self.model.select_move(board)
+            print(selected)
+            print(info)
             result = yield self.run_command(str(selected))
 
-            self.tell_to(self.opponent_name, "Here are the top moves I considered:")
-            for score, move in analysis[:5]:
-                move_str = '{} {:.2f}'.format(board.san(move), score)
-                print(move_str)
-                self.tell_to(self.opponent_name, move_str)
+            self.tell_to(self.opponent_name, str(info))
+#            for score, move in analysis[:5]:
+#                move_str = '{} {:.2f}'.format(board.san(move), score)
+#                print(move_str)
+#                self.tell_to(self.opponent_name, move_str)
 
         except:
             pass
@@ -221,7 +222,7 @@ if __name__ == "__main__":
         log_level=logging.WARN
     logging.basicConfig(level=log_level)
 
-    cn = chessnet.ChessNet(load_model_filename=sys.argv[1])
+    cn = chessnet.ChessNet(load_model_filename=sys.argv[1], move_temp=0.01)
     my_console = MyConsoleProtocol()
     my_client = MyFicsClient(my_console, cn)
     reactor.connectTCP(

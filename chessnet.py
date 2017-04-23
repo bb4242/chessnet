@@ -7,6 +7,7 @@ from glob import glob
 import click
 import numpy as np
 import git
+import copy
 
 from keras.layers import Dense, Convolution2D, Flatten, BatchNormalization, Dropout, Merge, Embedding, RepeatVector, Reshape, MaxPooling2D
 from keras.models import load_model, Sequential
@@ -208,16 +209,75 @@ class ChessNet(ChessEngine):
 
         return sorted(zip(scores_dist, moves), reverse=True)
 
-    def select_move(self, board):
-        """Choose a move for the current position, according to the multinomial distribution
-        returned by analyze_position.
+    def get_board_score(self, board):
+        """Evaluate the network on the current board and return the score"""
+        nbt, net = Preprocessor.board_to_tensor(board)
+        return self.board_score.predict([nbt[np.newaxis], net[np.newaxis]])[0, 0]
+
+    def select_move(self, board, depth):
+        """Choose a move for the current position, searching to the specified
+        (2-ply) depth before applying the board score to evaluate leaf nodes.
         """
-        scores = self.analyze_position(board)
-        # Work around a numpy multinomial quirk; put the highest probability move
-        # at the end of the list to avoid "ValueError: sum(pvals[:-1]) > 1.0" errors
-        scores.reverse()
-        selected_idx = np.argmax(np.random.multinomial(1, [s[0] for s in scores]))
-        return scores[selected_idx][1], {}
+        self.n_nodes = 0
+        self.alpha_cutoffs = 0
+        self.beta_cutoffs = 0
+
+        minimax_val, best_board = self.alphabeta(board, depth*2)
+
+        info = {
+            'minimax_val': minimax_val,
+            'nodes_searched': self.n_nodes,
+            'alpha_cutoffs': self.alpha_cutoffs,
+            'beta_cutoffs': self.beta_cutoffs
+        }
+        return best_board.move_stack[0], info
+
+    def alphabeta(self, board, depth, alpha=-np.inf, beta=np.inf):
+        if depth == 0:
+            self.n_nodes += 1
+            if board.is_game_over():
+                if board.result == '1-0':
+                    val = np.inf
+                elif board.result == '0-1':
+                    val = -np.inf
+                else:
+                    val = 0
+            else:
+                val = self.get_board_score(board)
+            return val, copy.deepcopy(board)
+
+        moves = [e[1] for e in self.analyze_position(board)]
+
+        if board.turn == chess.WHITE:
+            v = -np.inf
+            bb = None
+            for move in moves:
+                board.push(move)
+                v0, bcopy = self.alphabeta(board, depth-1, alpha, beta)
+                if v0 > v:
+                    v = v0
+                    bb = bcopy
+                board.pop()
+                alpha = max(v, alpha)
+                if beta <= alpha:
+                    self.beta_cutoffs += 1
+                    break
+            return v, bb
+        else:
+            v = np.inf
+            bb = None
+            for move in moves:
+                board.push(move)
+                v0, bcopy = self.alphabeta(board, depth-1, alpha, beta)
+                if v0 < v:
+                    v = v0
+                    bb = bcopy
+                board.pop()
+                beta = min(v, beta)
+                if beta <= alpha:
+                    self.alpha_cutoffs += 1
+                    break
+            return v, bb
 
 
 @click.command()
